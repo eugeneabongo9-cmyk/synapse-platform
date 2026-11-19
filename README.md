@@ -1,101 +1,68 @@
 # Synapse Platform
 
-> Production-grade distributed AI agent orchestration engine built to demonstrate staff/principal-level software engineering.
+> **Production-grade distributed AI agent orchestration engine**  
+> Demonstrating staff/principal-level software engineering practices.
 
 [![CI](https://github.com/eugeneabongo9-cmyk/synapse-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/eugeneabongo9-cmyk/synapse-platform/actions)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## What This Project Demonstrates
-
-This repository is intentionally engineered as a **showcase of advanced software engineering practices** expected from engineers with 15-20+ years of experience:
-
-- **Hexagonal / Ports & Adapters Architecture** with clear domain boundaries
-- **Event-driven microservices** with at-least-once delivery guarantees
-- **Polyglot implementation** (Go for orchestration, Rust for high-performance agent runtime)
-- **Domain-Driven Design** tactical patterns (Aggregates, Value Objects, Domain Events)
-- **Observability-first design** (OpenTelemetry traces, metrics, structured logging)
-- **Reliability engineering**: circuit breakers, retries with backoff, idempotency keys
-- **Production-ready packaging**: multi-stage Docker builds, docker-compose, K8s manifests
-- **Comprehensive CI/CD** with multi-language testing, linting, and security scanning
-- **Clean architecture** that separates domain logic from infrastructure concerns
-
-## Architecture Overview
-
-```
-┌───────────────────────────────────────────────┐
-│                   API Gateway                        │
-│              (REST + GraphQL + WebSocket)            │
-└──────────────────────────────┬────────────────┘
-                               │
-         ┌───────────────────────┼─────────────────────┐
-         │                    │                    │
-┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
-│  Orchestrator  │    │   Event Bus    │    │ Agent Runtime │
-│   (Go / Hex)    │────│  (Redis/NATS)  │────│   (Rust)       │
-│               │    │               │    │              │
-│ Domain Model  │    │ Domain Events │    │ High-perf     │
-│ Aggregates    │    │ Outbox Pattern│    │ Execution     │
-└───────────────────┘    └──────────────────┘    └──────────────────┘
-```
-
-## Quick Start
+## Run It in 60 Seconds
 
 ```bash
-# Start the full platform
-docker compose up --build
-
-# The API will be available at http://localhost:8080
-# Grafana dashboards at http://localhost:3000 (admin/admin)
+git clone https://github.com/eugeneabongo9-cmyk/synapse-platform.git
+cd synapse-platform
+docker compose -f infrastructure/docker-compose.yml up --build
 ```
 
-## Key Design Principles
+Then open **http://localhost:8080** in your browser.
 
-1. **Domain isolation** — Business logic has zero infrastructure dependencies
-2. **Explicit contracts** — All boundaries use well-defined ports and adapters
-3. **Observability by default** — Every critical path emits traces and metrics
-4. **Fail gracefully** — Circuit breakers, bulkheads, and graceful degradation
-5. **Testability** — Domain layer is 100% unit-testable without mocks of infrastructure
+You will see a live interactive demo where you can:
+- Create AI agents
+- Transition them through their lifecycle (Pending → Running → Completed)
+- Watch the domain model enforce valid state transitions
+
+## What This Demonstrates
+
+This is not a toy project. It is engineered to the standards expected from engineers with 15–20+ years of experience:
+
+| Practice | Implementation |
+|----------|----------------|
+| **Hexagonal Architecture** | Domain has zero infrastructure dependencies |
+| **Domain-Driven Design** | Aggregates, invariants, domain events, lifecycle |
+| **Clean boundaries** | Ports & Adapters, dependency inversion |
+| **Production mindset** | Graceful shutdown, health checks, structured logging |
+| **Testability** | Domain logic is fully unit-tested |
+| **Polyglot** | Go orchestrator + Rust agent runtime |
+| **Observability ready** | Structured logs, health endpoint, metrics hooks |
+| **Container-native** | Multi-stage Docker builds, docker-compose |
+
+## Architecture
+
+```
+Browser UI  →  HTTP Adapter  →  Application Service  →  Domain Model
+                                      ↓
+                                 In-Memory Repo / Event Bus
+```
+
+The domain model enforces business rules (an agent can only be started from `pending`, completed from `running`, etc.). Invalid transitions are rejected at the domain layer.
 
 ## Project Structure
 
 ```
-synapse-platform/
-├── services/
-│   ├── orchestrator/     # Go hexagonal architecture core
-│   ├── agent-runtime/    # Rust high-performance execution engine
-│   └── api-gateway/      # GraphQL + REST + WebSocket gateway
-├── infrastructure/
-│   ├── docker-compose.yml
-│   └── k8s/
-├── docs/
-│   ├── architecture.md
-│   └── design-decisions.md
-└── .github/workflows/
+services/orchestrator/          # Go hexagonal core (fully working)
+services/agent-runtime/         # Rust high-performance execution stub
+infrastructure/docker-compose.yml
+docs/                           # Architecture & ADRs
 ```
 
-## Technology Choices & Rationale
+## Next Steps (for further expansion)
 
-| Component | Technology | Why |
-|-----------|------------|-----|
-| Orchestrator | Go | Excellent concurrency, strong typing, mature ecosystem for systems work |
-| Agent Runtime | Rust | Zero-cost abstractions, memory safety, extreme performance for execution |
-| Event Bus | Redis Streams / NATS | Lightweight yet production-capable for demonstration |
-| Observability | OpenTelemetry | Vendor-neutral, industry standard |
-| API | GraphQL + REST | Flexibility for clients + simplicity for internal services |
+- Replace in-memory repository with PostgreSQL + transactional outbox
+- Add real NATS/Redis event bus
+- Implement the full agent runtime dispatch
+- Add OpenTelemetry tracing
+- Kubernetes manifests
 
-## What Hiring Managers Look For
-
-This codebase demonstrates:
-
-- Ability to design systems that scale and remain maintainable
-- Deep understanding of distributed systems trade-offs
-- Production mindset (observability, reliability, testing)
-- Clean code that other engineers can extend
-- Thoughtful technology selection with clear rationale
-
-## Contributing
-
-This is a showcase repository. Issues and PRs demonstrating improvements to architecture, reliability, or performance are welcome.
+This codebase is intentionally structured so those additions do not require rewriting the domain.
 
 ## License
 

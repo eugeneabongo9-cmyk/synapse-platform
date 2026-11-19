@@ -9,18 +9,16 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// AgentRepository defines the port for agent persistence.
 type AgentRepository interface {
 	Save(ctx context.Context, agent *domain.Agent) error
 	FindByID(ctx context.Context, id uuid.UUID) (*domain.Agent, error)
+	List(ctx context.Context) ([]*domain.Agent, error)
 }
 
-// EventBus defines the port for publishing domain events.
 type EventBus interface {
 	Publish(ctx context.Context, events []domain.DomainEvent) error
 }
 
-// OrchestratorService is the application service coordinating use cases.
 type OrchestratorService struct {
 	repo     AgentRepository
 	eventBus EventBus
@@ -28,53 +26,61 @@ type OrchestratorService struct {
 }
 
 func NewOrchestratorService(repo AgentRepository, bus EventBus, logger zerolog.Logger) *OrchestratorService {
-	return &OrchestratorService{
-		repo:     repo,
-		eventBus: bus,
-		logger:   logger,
-	}
+	return &OrchestratorService{repo: repo, eventBus: bus, logger: logger}
 }
 
-// CreateAgent handles the create agent use case.
 func (s *OrchestratorService) CreateAgent(ctx context.Context, name string) (*domain.Agent, error) {
 	agent, err := domain.NewAgent(name)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create agent: %w", err)
+		return nil, err
 	}
-
 	if err := s.repo.Save(ctx, agent); err != nil {
-		return nil, fmt.Errorf("failed to persist agent: %w", err)
+		return nil, err
 	}
-
-	if err := s.eventBus.Publish(ctx, agent.Events()); err != nil {
-		s.logger.Error().Err(err).Msg("failed to publish events")
-		// Note: In production, this would use outbox pattern
-	}
-
+	_ = s.eventBus.Publish(ctx, agent.Events())
 	agent.ClearEvents()
-
-	s.logger.Info().
-		Str("agent_id", agent.ID.String()).
-		Str("name", name).
-		Msg("agent created")
-
+	s.logger.Info().Str("id", agent.ID.String()).Str("name", name).Msg("agent created")
 	return agent, nil
 }
 
-// StartAgent handles starting an agent.
 func (s *OrchestratorService) StartAgent(ctx context.Context, id uuid.UUID) error {
 	agent, err := s.repo.FindByID(ctx, id)
 	if err != nil {
-		return fmt.Errorf("agent not found: %w", err)
+		return err
 	}
-
 	if err := agent.Start(); err != nil {
 		return err
 	}
-
 	if err := s.repo.Save(ctx, agent); err != nil {
-		return fmt.Errorf("failed to save agent: %w", err)
+		return err
 	}
+	_ = s.eventBus.Publish(ctx, agent.Events())
+	agent.ClearEvents()
+	s.logger.Info().Str("id", id.String()).Msg("agent started")
+	return nil
+}
 
-	return s.eventBus.Publish(ctx, agent.Events())
+func (s *OrchestratorService) CompleteAgent(ctx context.Context, id uuid.UUID) error {
+	agent, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := agent.Complete(); err != nil {
+		return err
+	}
+	if err := s.repo.Save(ctx, agent); err != nil {
+		return err
+	}
+	_ = s.eventBus.Publish(ctx, agent.Events())
+	agent.ClearEvents()
+	s.logger.Info().Str("id", id.String()).Msg("agent completed")
+	return nil
+}
+
+func (s *OrchestratorService) GetAgent(ctx context.Context, id uuid.UUID) (*domain.Agent, error) {
+	return s.repo.FindByID(ctx, id)
+}
+
+func (s *OrchestratorService) ListAgents(ctx context.Context) ([]*domain.Agent, error) {
+	return s.repo.List(ctx)
 }
