@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/eugeneabongo9-cmyk/synapse-platform/services/orchestrator/internal/adapters/http"
+	"github.com/eugeneabongo9-cmyk/synapse-platform/services/orchestrator/internal/adapters/memory"
 	"github.com/eugeneabongo9-cmyk/synapse-platform/services/orchestrator/internal/adapters/postgres"
 	redisadapter "github.com/eugeneabongo9-cmyk/synapse-platform/services/orchestrator/internal/adapters/redis"
 	"github.com/eugeneabongo9-cmyk/synapse-platform/services/orchestrator/internal/application"
@@ -28,77 +29,96 @@ func main() {
 	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
 	ctx := context.Background()
 
-	// OpenTelemetry
-	exp, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpoint(getEnv("OTEL_ENDPOINT", "jaeger:4318")),
-		otlptracehttp.WithInsecure(),
-	)
-	if err == nil {
-		tp := sdktrace.NewTracerProvider(
-			sdktrace.WithBatcher(exp),
-			sdktrace.WithResource(resource.NewWithAttributes(
-				semconv.SchemaURL,
-				semconv.ServiceName("synapse-orchestrator"),
-			)),
+	// Optional OpenTelemetry
+	if endpoint := os.Getenv("OTEL_ENDPOINT"); endpoint != "" {
+		exp, err := otlptracehttp.New(ctx,
+			otlptracehttp.WithEndpoint(endpoint),
+			otlptracehttp.WithInsecure(),
 		)
-		otel.SetTracerProvider(tp)
-		defer func() { _ = tp.Shutdown(ctx) }()
-		logger.Info().Msg("OpenTelemetry tracing enabled")
+		if err == nil {
+			tp := sdktrace.NewTracerProvider(
+				sdktrace.WithBatcher(exp),
+				sdktrace.WithResource(resource.NewWithAttributes(
+					semconv.SchemaURL,
+					semconv.ServiceName("synapse-orchestrator"),
+				)),
+			)
+			otel.SetTracerProvider(tp)
+			defer func() { _ = tp.Shutdown(ctx) }()
+			logger.Info().Msg("OpenTelemetry tracing enabled")
+		}
 	}
 
-	// Postgres
-	dbURL := getEnv("DATABASE_URL", "postgres://synapse:synapse@postgres:5432/synapse?sslmode=disable")
-	pool, err := pgxpool.New(ctx, dbURL)
-	if err != nil {
-		log.Fatal("postgres: ", err)
-	}
-	defer pool.Close()
+	var repo application.AgentRepository
+	var eventBus application.EventBus
 
-	if err := pool.Ping(ctx); err != nil {
-		log.Fatal("postgres ping: ", err)
+	dbURL := os.Getenv("DATABASE_URL")
+	redisURL := os.Getenv("REDIS_URL")
+
+	if dbURL != "" {
+		// Full production mode: Postgres + Redis + Outbox
+		logger.Info().Msg("Starting in Postgres + Redis mode")
+
+		pool, err := pgxpool.New(ctx, dbURL)
+		if err != nil {
+			log.Fatal("postgres: ", err)
+		}
+		defer pool.Close()
+
+		if err := pool.Ping(ctx); err != nil {
+			log.Fatal("postgres ping: ", err)
+		}
+
+		_, err = pool.Exec(ctx, `
+			CREATE TABLE IF NOT EXISTS agents (
+				id UUID PRIMARY KEY,
+				name TEXT NOT NULL,
+				status TEXT NOT NULL,
+				created_at TIMESTAMPTZ NOT NULL,
+				updated_at TIMESTAMPTZ NOT NULL,
+				version INT NOT NULL
+			);
+			CREATE TABLE IF NOT EXISTS outbox (
+				id UUID PRIMARY KEY,
+				aggregate_id UUID NOT NULL,
+				event_type TEXT NOT NULL,
+				payload JSONB NOT NULL,
+				created_at TIMESTAMPTZ NOT NULL,
+				processed_at TIMESTAMPTZ,
+				retry_count INT DEFAULT 0,
+				next_retry_at TIMESTAMPTZ
+			);
+		`)
+		if err != nil {
+			log.Fatal("migration: ", err)
+		}
+
+		repo = postgres.NewAgentRepository(pool)
+
+		if redisURL != "" {
+			rdb := redis.NewClient(&redis.Options{Addr: redisURL})
+			if err := rdb.Ping(ctx).Err(); err != nil {
+				log.Fatal("redis: ", err)
+			}
+			eventBus = redisadapter.NewEventBus(rdb)
+
+			outbox := postgres.NewOutboxProcessor(pool, rdb, logger)
+			outboxCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			go outbox.Start(outboxCtx)
+		} else {
+			eventBus = memory.NewInMemoryEventBus()
+		}
+	} else {
+		// Zero-dependency mode for local demo
+		logger.Info().Msg("Starting in in-memory mode (no Postgres/Redis required)")
+		repo = memory.NewAgentRepository()
+		eventBus = memory.NewInMemoryEventBus()
 	}
 
-	_, err = pool.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS agents (
-			id UUID PRIMARY KEY,
-			name TEXT NOT NULL,
-			status TEXT NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL,
-			updated_at TIMESTAMPTZ NOT NULL,
-			version INT NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS outbox (
-			id UUID PRIMARY KEY,
-			aggregate_id UUID NOT NULL,
-			event_type TEXT NOT NULL,
-			payload JSONB NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL,
-			processed_at TIMESTAMPTZ,
-			retry_count INT DEFAULT 0,
-			next_retry_at TIMESTAMPTZ
-		);
-	`)
-	if err != nil {
-		log.Fatal("migration: ", err)
-	}
-
-	// Redis
-	redisAddr := getEnv("REDIS_URL", "redis:6379")
-	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		log.Fatal("redis: ", err)
-	}
-
-	repo := postgres.NewAgentRepository(pool)
-	eventBus := redisadapter.NewEventBus(rdb)
 	service := application.NewOrchestratorService(repo, eventBus, logger)
-
-	outbox := postgres.NewOutboxProcessor(pool, rdb, logger)
-	outboxCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	go outbox.Start(outboxCtx)
-
 	handler := http.NewHandler(service, logger)
+
 	mux := handler.Router()
 	mux.Handle("/metrics", promhttp.Handler())
 
@@ -110,10 +130,8 @@ func main() {
 	}
 
 	go func() {
-		logger.Info().Msg("Synapse Orchestrator (staff-level) ready")
-		logger.Info().Msg("Demo UI  → http://localhost:8080")
-		logger.Info().Msg("Metrics  → http://localhost:8080/metrics")
-		logger.Info().Msg("Jaeger   → http://localhost:16686")
+		logger.Info().Msg("Synapse Orchestrator ready")
+		logger.Info().Msg("Demo UI → http://localhost:8080")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)
 		}
@@ -122,15 +140,9 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	logger.Info().Msg("graceful shutdown")
-	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancelShutdown()
-	_ = server.Shutdown(shutdownCtx)
-}
 
-func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
+	logger.Info().Msg("shutting down")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = server.Shutdown(shutdownCtx)
 }
