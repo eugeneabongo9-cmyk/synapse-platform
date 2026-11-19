@@ -3,9 +3,7 @@
 > **Production-grade distributed AI agent orchestration engine**  
 > Demonstrating staff/principal-level software engineering practices.
 
-[![CI](https://github.com/eugeneabongo9-cmyk/synapse-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/eugeneabongo9-cmyk/synapse-platform/actions)
-
-## Run It in 60 Seconds
+## Run the Full Stack
 
 ```bash
 git clone https://github.com/eugeneabongo9-cmyk/synapse-platform.git
@@ -13,56 +11,57 @@ cd synapse-platform
 docker compose -f infrastructure/docker-compose.yml up --build
 ```
 
-Then open **http://localhost:8080** in your browser.
+| Service | URL |
+|---------|-----|
+| **Interactive Demo** | http://localhost:8080 |
+| **Jaeger Tracing UI** | http://localhost:16686 |
+| **Postgres** | localhost:5432 |
+| **Redis** | localhost:6379 |
 
-You will see a live interactive demo where you can:
-- Create AI agents
-- Transition them through their lifecycle (Pending → Running → Completed)
-- Watch the domain model enforce valid state transitions
+## What This Version Demonstrates
 
-## What This Demonstrates
+This is a significantly more advanced system:
 
-This is not a toy project. It is engineered to the standards expected from engineers with 15–20+ years of experience:
+- **PostgreSQL persistence** with proper schema
+- **Transactional Outbox Pattern** — domain events are written in the same transaction as the aggregate, then reliably published
+- **Redis Streams** as the event bus
+- **OpenTelemetry distributed tracing** (view traces in Jaeger)
+- **Hexagonal architecture** still fully intact — domain has zero knowledge of Postgres, Redis, or OTel
+- **Background outbox processor** with `SKIP LOCKED` for safe concurrent processing
+- **Graceful startup dependencies** via Docker healthchecks
 
-| Practice | Implementation |
-|----------|----------------|
-| **Hexagonal Architecture** | Domain has zero infrastructure dependencies |
-| **Domain-Driven Design** | Aggregates, invariants, domain events, lifecycle |
-| **Clean boundaries** | Ports & Adapters, dependency inversion |
-| **Production mindset** | Graceful shutdown, health checks, structured logging |
-| **Testability** | Domain logic is fully unit-tested |
-| **Polyglot** | Go orchestrator + Rust agent runtime |
-| **Observability ready** | Structured logs, health endpoint, metrics hooks |
-| **Container-native** | Multi-stage Docker builds, docker-compose |
-
-## Architecture
+### Architecture Flow
 
 ```
-Browser UI  →  HTTP Adapter  →  Application Service  →  Domain Model
-                                      ↓
-                                 In-Memory Repo / Event Bus
+HTTP Request
+    ↓
+Application Service
+    ↓
+Domain Aggregate (raises events)
+    ↓
+Postgres Transaction
+    ├── Update agents table
+    └── Insert into outbox table
+            ↓
+Outbox Processor (background)
+    ↓
+Redis Stream (synapse.events)
+    ↓
+(Future consumers / agent runtime)
 ```
 
-The domain model enforces business rules (an agent can only be started from `pending`, completed from `running`, etc.). Invalid transitions are rejected at the domain layer.
+The domain model remains pure. All infrastructure concerns live in adapters.
 
-## Project Structure
+## Key Patterns on Display
 
-```
-services/orchestrator/          # Go hexagonal core (fully working)
-services/agent-runtime/         # Rust high-performance execution stub
-infrastructure/docker-compose.yml
-docs/                           # Architecture & ADRs
-```
-
-## Next Steps (for further expansion)
-
-- Replace in-memory repository with PostgreSQL + transactional outbox
-- Add real NATS/Redis event bus
-- Implement the full agent runtime dispatch
-- Add OpenTelemetry tracing
-- Kubernetes manifests
-
-This codebase is intentionally structured so those additions do not require rewriting the domain.
+| Pattern | Where |
+|---------|-------|
+| Hexagonal Architecture | Entire orchestrator service |
+| Transactional Outbox | `postgres/repository.go` + `outbox.go` |
+| Idempotent event publishing | Outbox `processed_at` + `SKIP LOCKED` |
+| Distributed Tracing | OpenTelemetry + Jaeger |
+| Domain invariants | `domain/agent.go` |
+| Clean dependency inversion | Ports defined in application layer |
 
 ## License
 
