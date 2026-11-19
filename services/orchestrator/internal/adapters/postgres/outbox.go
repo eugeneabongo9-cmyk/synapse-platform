@@ -2,10 +2,8 @@ package postgres
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
-	"github.com/eugeneabongo9-cmyk/synapse-platform/services/orchestrator/internal/domain"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -67,15 +65,14 @@ func (p *OutboxProcessor) processBatch(ctx context.Context) {
 		err = p.redis.XAdd(ctx, &redis.XAddArgs{
 			Stream: "synapse.events",
 			Values: map[string]interface{}{
-				"event_type":    eventType,
-				"aggregate_id":  aggID.String(),
-				"payload":       string(payload),
-				"retry_count":   retryCount,
+				"event_type":   eventType,
+				"aggregate_id": aggID.String(),
+				"payload":      string(payload),
+				"retry_count":  retryCount,
 			},
 		}).Err()
 
 		if err != nil {
-			// Exponential backoff on failure
 			nextRetry := time.Now().Add(time.Duration(1<<uint(retryCount)) * time.Second)
 			_, _ = p.pool.Exec(ctx, `
 				UPDATE outbox 

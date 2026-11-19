@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/eugeneabongo9-cmyk/synapse-platform/services/orchestrator/internal/domain"
 	"github.com/google/uuid"
