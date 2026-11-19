@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/eugeneabongo9-cmyk/synapse-platform/services/orchestrator/internal/adapters/http"
+	httpadapter "github.com/eugeneabongo9-cmyk/synapse-platform/services/orchestrator/internal/adapters/http"
 	"github.com/eugeneabongo9-cmyk/synapse-platform/services/orchestrator/internal/adapters/memory"
 	"github.com/eugeneabongo9-cmyk/synapse-platform/services/orchestrator/internal/adapters/postgres"
 	redisadapter "github.com/eugeneabongo9-cmyk/synapse-platform/services/orchestrator/internal/adapters/redis"
@@ -56,7 +56,6 @@ func main() {
 	redisURL := os.Getenv("REDIS_URL")
 
 	if dbURL != "" {
-		// Full production mode: Postgres + Redis + Outbox
 		logger.Info().Msg("Starting in Postgres + Redis mode")
 
 		pool, err := pgxpool.New(ctx, dbURL)
@@ -110,14 +109,13 @@ func main() {
 			eventBus = memory.NewInMemoryEventBus()
 		}
 	} else {
-		// Zero-dependency mode for local demo
 		logger.Info().Msg("Starting in in-memory mode (no Postgres/Redis required)")
 		repo = memory.NewAgentRepository()
 		eventBus = memory.NewInMemoryEventBus()
 	}
 
 	service := application.NewOrchestratorService(repo, eventBus, logger)
-	handler := http.NewHandler(service, logger)
+	handler := httpadapter.NewHandler(service, logger)
 
 	mux := handler.Router()
 	mux.Handle("/metrics", promhttp.Handler())
@@ -131,7 +129,7 @@ func main() {
 
 	go func() {
 		logger.Info().Msg("Synapse Orchestrator ready")
-		logger.Info().Msg("Demo UI → http://localhost:8080")
+		logger.Info().Msg("Demo UI -> http://localhost:8080")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)
 		}
