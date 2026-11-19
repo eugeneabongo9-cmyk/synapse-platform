@@ -20,7 +20,7 @@ func NewHandler(service *application.OrchestratorService, logger zerolog.Logger)
 	return &Handler{service: service, logger: logger}
 }
 
-func (h *Handler) Router() http.Handler {
+func (h *Handler) Router() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /api/v1/agents", h.createAgent)
