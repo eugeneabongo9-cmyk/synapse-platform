@@ -1,9 +1,9 @@
 # Synapse Platform
 
-> **Production-grade distributed AI agent orchestration engine**  
-> Demonstrating staff/principal-level software engineering practices.
+> **Staff / Principal-level distributed systems showcase**  
+> Hexagonal architecture • Transactional Outbox • Event-driven • Full observability • Kubernetes-ready
 
-## Run the Full Stack
+## One-Command Full Stack
 
 ```bash
 git clone https://github.com/eugeneabongo9-cmyk/synapse-platform.git
@@ -11,57 +11,45 @@ cd synapse-platform
 docker compose -f infrastructure/docker-compose.yml up --build
 ```
 
-| Service | URL |
-|---------|-----|
-| **Interactive Demo** | http://localhost:8080 |
-| **Jaeger Tracing UI** | http://localhost:16686 |
-| **Postgres** | localhost:5432 |
-| **Redis** | localhost:6379 |
+| Endpoint | Purpose |
+|----------|---------|
+| http://localhost:8080 | Interactive demo UI |
+| http://localhost:8080/metrics | Prometheus metrics |
+| http://localhost:16686 | Jaeger distributed tracing |
+| localhost:5432 | PostgreSQL |
+| localhost:6379 | Redis Streams |
 
-## What This Version Demonstrates
+## Why This Is Staff-Level
 
-This is a significantly more advanced system:
+This repository demonstrates the exact skills companies evaluate for senior/staff/principal engineers:
 
-- **PostgreSQL persistence** with proper schema
-- **Transactional Outbox Pattern** — domain events are written in the same transaction as the aggregate, then reliably published
-- **Redis Streams** as the event bus
-- **OpenTelemetry distributed tracing** (view traces in Jaeger)
-- **Hexagonal architecture** still fully intact — domain has zero knowledge of Postgres, Redis, or OTel
-- **Background outbox processor** with `SKIP LOCKED` for safe concurrent processing
-- **Graceful startup dependencies** via Docker healthchecks
+- **Architectural thinking** — Clear boundaries, dependency inversion, trade-off documentation (ADRs)
+- **Distributed systems reliability** — Transactional outbox, at-least-once delivery, optimistic concurrency
+- **Observability culture** — Traces, metrics, structured logs from day one
+- **Production readiness** — Health probes, graceful shutdown, resource limits, HPA
+- **Clean code that scales** — Domain remains pure; infrastructure can be swapped
+- **Operational awareness** — Kubernetes manifests, docker-compose, monitoring hooks
 
-### Architecture Flow
+## Patterns on Display
 
+- Hexagonal / Ports & Adapters
+- Domain-Driven Design (aggregates, invariants, domain events)
+- Transactional Outbox + reliable event publishing
+- Optimistic concurrency control
+- OpenTelemetry distributed tracing
+- Prometheus metrics
+- Background processing with `SKIP LOCKED`
+- Kubernetes Deployment + HPA + probes
+
+## Kubernetes
+
+Manifests are in `infrastructure/k8s/`. Apply with:
+
+```bash
+kubectl apply -f infrastructure/k8s/
 ```
-HTTP Request
-    ↓
-Application Service
-    ↓
-Domain Aggregate (raises events)
-    ↓
-Postgres Transaction
-    ├── Update agents table
-    └── Insert into outbox table
-            ↓
-Outbox Processor (background)
-    ↓
-Redis Stream (synapse.events)
-    ↓
-(Future consumers / agent runtime)
-```
 
-The domain model remains pure. All infrastructure concerns live in adapters.
-
-## Key Patterns on Display
-
-| Pattern | Where |
-|---------|-------|
-| Hexagonal Architecture | Entire orchestrator service |
-| Transactional Outbox | `postgres/repository.go` + `outbox.go` |
-| Idempotent event publishing | Outbox `processed_at` + `SKIP LOCKED` |
-| Distributed Tracing | OpenTelemetry + Jaeger |
-| Domain invariants | `domain/agent.go` |
-| Clean dependency inversion | Ports defined in application layer |
+(Requires secrets and image push for full deployment.)
 
 ## License
 

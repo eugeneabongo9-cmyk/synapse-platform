@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: synapse-config
+data:
+  LOG_LEVEL: "info"
+  OUTBOX_POLL_INTERVAL: "500ms"

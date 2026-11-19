@@ -1,42 +1,30 @@
-# Architecture Decision Records (ADRs)
+# Architecture Decision Records
 
-## ADR-001: Hexagonal Architecture for Orchestrator
+## ADR-004: Transactional Outbox over Dual Writes
 
-**Status**: Accepted
+**Status**: Accepted  
+**Context**: We must guarantee that agent state changes and domain events are consistent.  
+**Decision**: Write both in one Postgres transaction. A separate process publishes from the outbox.  
+**Consequences**: Eventual consistency for consumers; operational need to monitor outbox lag; excellent reliability.  
+**Alternatives considered**: CDC (Debezium) — more operational complexity for this showcase.
 
-**Context**: We need a maintainable core that can evolve as requirements change without rewriting infrastructure.
+## ADR-005: Redis Streams as Event Bus
 
-**Decision**: Adopt hexagonal architecture with strict dependency inversion.
+**Status**: Accepted  
+**Context**: Need a lightweight, production-capable bus for the demo that supports consumer groups.  
+**Decision**: Redis Streams.  
+**Consequences**: Simple to run locally; can be swapped for NATS/Kafka without domain changes.
 
-**Consequences**:
-- Domain logic is 100% unit testable
-- Infrastructure can be swapped (e.g., Postgres → DynamoDB) without domain changes
-- Slightly more upfront ceremony
+## ADR-006: OpenTelemetry + Prometheus
 
-## ADR-002: Polyglot Services
+**Status**: Accepted  
+**Context**: Production systems must be observable.  
+**Decision**: OTel for traces, Prometheus client for metrics.  
+**Consequences**: Vendor-neutral; integrates with existing Grafana/Jaeger stack.
 
-**Status**: Accepted
+## ADR-007: Optimistic Concurrency via Version Column
 
-**Context**: Different parts of the system have different performance and safety requirements.
-
-**Decision**:
-- Go for orchestration and API layers (productivity + concurrency)
-- Rust for agent runtime (performance + memory safety)
-
-**Consequences**:
-- Higher cognitive load for the team
-- Demonstrates ability to choose the right tool for the job
-- Clear service boundaries prevent language leakage
-
-## ADR-003: Event-Driven with Outbox Pattern
-
-**Status**: Accepted
-
-**Context**: Need reliable inter-service communication without distributed transactions.
-
-**Decision**: Use domain events + transactional outbox.
-
-**Consequences**:
-- Eventual consistency
-- Guaranteed delivery
-- Increased operational complexity (outbox processor)
+**Status**: Accepted  
+**Context**: Multiple requests may try to transition the same agent.  
+**Decision**: Increment `version` on every write; reject if version mismatch (future enhancement).  
+**Consequences**: Simple and effective for moderate contention.

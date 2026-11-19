@@ -1,59 +1,44 @@
-# Architecture Deep Dive
+# Architecture Deep Dive — Staff Level
 
-## Hexagonal Architecture in the Orchestrator
+## Core Principles
 
-The orchestrator service follows strict hexagonal architecture:
+1. **Domain purity** — The domain package has zero imports from infrastructure or frameworks.
+2. **Transactional consistency** — Aggregate state + domain events are written atomically via the outbox.
+3. **At-least-once delivery** — Outbox + idempotent consumers.
+4. **Observability by default** — Traces (OTel), metrics (Prometheus), structured logs.
+5. **Failure isolation** — Health checks, graceful degradation, future circuit breakers.
+
+## Reliability Patterns Implemented
+
+| Pattern | Implementation | Purpose |
+|---------|----------------|---------|
+| Transactional Outbox | Postgres `outbox` table + background processor | Prevent dual-write inconsistency |
+| Optimistic concurrency | `version` column on agents | Detect concurrent modifications |
+| Idempotent publishing | Outbox `processed_at` + consumer deduplication | Safe redelivery |
+| Health & readiness | `/health` endpoint + Docker/K8s probes | Orchestration readiness |
+| Structured logging | zerolog with correlation | Debuggability |
+| Distributed tracing | OpenTelemetry → Jaeger | Request flow visibility |
+
+## Future Patterns (ready to add)
+
+- **Circuit Breaker** around external agent runtime calls
+- **Saga orchestration** for multi-agent workflows
+- **CQRS read models** for query optimization
+- **Event sourcing** of full agent history (current model is state + events)
+- **Rate limiting & bulkheads** per tenant
+
+## Data Flow
 
 ```
-                    ┌─────────────────────────────────────┐
-                    │           Domain Layer              │
-                    │  (Pure business logic, no deps)    │
-                    │                                    │
-                    │  • Aggregates (Agent, Workflow)  │
-                    │  • Value Objects                 │
-                    │  • Domain Events                 │
-                    │  • Domain Services               │
-                    └─────────────────────────────────────┘
-                                      ▲
-                                      │ Ports (interfaces)
-                    ┌─────────────────────────────────────┐
-                    │        Application Layer            │
-                    │   (Use cases, orchestration)       │
-                    └─────────────────────────────────────┘
-                                      ▲
-                                      │
-         ┌──────────────────────────────────────────────┐
-         │              Adapters                     │
-         │  • HTTP/GraphQL   • Redis Event Bus     │
-         │  • PostgreSQL     • OpenTelemetry       │
-         │  • WebSocket      • Circuit Breaker     │
-         └──────────────────────────────────────────────┘
+Client → HTTP Adapter → Application Service → Domain Aggregate
+                                      ↓
+                               Postgres Transaction
+                               ├─ agents (state)
+                               └─ outbox (events)
+                                      ↓
+                            Outbox Processor (poll + SKIP LOCKED)
+                                      ↓
+                                 Redis Stream
+                                      ↓
+                           (Consumers / Agent Runtime)
 ```
-
-## Event-Driven Communication
-
-All inter-service communication uses domain events with the **Transactional Outbox** pattern to guarantee at-least-once delivery without dual-write problems.
-
-### Event Flow
-
-1. Domain aggregate raises domain event
-2. Event is persisted in the same transaction as the aggregate state change
-3. Background outbox processor publishes to the event bus
-4. Consumers process events idempotently
-
-## Reliability Patterns
-
-- **Circuit Breaker**: Protects against cascading failures to external agent runtimes
-- **Retry with Exponential Backoff + Jitter**: For transient failures
-- **Idempotency Keys**: All commands carry unique identifiers
-- **Bulkhead Isolation**: Separate thread pools for different concern areas
-- **Graceful Shutdown**: Proper signal handling and in-flight request draining
-
-## Observability
-
-Every service emits:
-
-- Distributed traces (OpenTelemetry)
-- Business and technical metrics
-- Structured logs with correlation IDs
-- Health and readiness probes
