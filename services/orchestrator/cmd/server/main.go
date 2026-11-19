@@ -11,6 +11,7 @@ import (
 
 	"github.com/eugeneabongo9-cmyk/synapse-platform/services/orchestrator/internal/adapters/http"
 	"github.com/eugeneabongo9-cmyk/synapse-platform/services/orchestrator/internal/adapters/postgres"
+	redisadapter "github.com/eugeneabongo9-cmyk/synapse-platform/services/orchestrator/internal/adapters/redis"
 	"github.com/eugeneabongo9-cmyk/synapse-platform/services/orchestrator/internal/application"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -27,8 +28,11 @@ func main() {
 
 	ctx := context.Background()
 
-	// OpenTelemetry setup
-	exp, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpoint("jaeger:4318"), otlptracehttp.WithInsecure())
+	// OpenTelemetry
+	exp, err := otlptracehttp.New(ctx,
+		otlptracehttp.WithEndpoint("jaeger:4318"),
+		otlptracehttp.WithInsecure(),
+	)
 	if err == nil {
 		tp := sdktrace.NewTracerProvider(
 			sdktrace.WithBatcher(exp),
@@ -38,22 +42,24 @@ func main() {
 			)),
 		)
 		otel.SetTracerProvider(tp)
-		defer tp.Shutdown(ctx)
-		logger.Info().Msg("OpenTelemetry tracing enabled")
+		defer func() { _ = tp.Shutdown(ctx) }()
+		logger.Info().Msg("OpenTelemetry tracing enabled → Jaeger")
+	} else {
+		logger.Warn().Err(err).Msg("OTel exporter not available, continuing without tracing")
 	}
 
 	// Postgres
 	pool, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
 	if err != nil {
-		log.Fatal("postgres: ", err)
+		log.Fatal("failed to connect to postgres: ", err)
 	}
 	defer pool.Close()
 
 	if err := pool.Ping(ctx); err != nil {
-		log.Fatal("postgres ping: ", err)
+		log.Fatal("postgres ping failed: ", err)
 	}
 
-	// Run migrations (simple inline for demo)
+	// Simple migrations
 	_, err = pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS agents (
 			id UUID PRIMARY KEY,
@@ -73,21 +79,23 @@ func main() {
 		);
 	`)
 	if err != nil {
-		log.Fatal("migration: ", err)
+		log.Fatal("migration failed: ", err)
 	}
 
 	// Redis
-	rdb := redis.NewClient(&redis.Options{Addr: os.Getenv("REDIS_URL")})
+	rdb := redis.NewClient(&redis.Options{
+		Addr: os.Getenv("REDIS_URL"),
+	})
 	if err := rdb.Ping(ctx).Err(); err != nil {
-		log.Fatal("redis: ", err)
+		log.Fatal("redis connection failed: ", err)
 	}
 
 	repo := postgres.NewAgentRepository(pool)
-	eventBus := redis.NewEventBus(rdb)
+	eventBus := redisadapter.NewEventBus(rdb)
 	service := application.NewOrchestratorService(repo, eventBus, logger)
 
 	outbox := postgres.NewOutboxProcessor(pool, rdb, logger)
-	outboxCtx, cancelOutbox := context.WithCancel(ctx)
+	outboxCtx, cancelOutbox := context.WithCancel(context.Background())
 	defer cancelOutbox()
 	go outbox.Start(outboxCtx)
 
@@ -101,9 +109,9 @@ func main() {
 	}
 
 	go func() {
-		logger.Info().Msg("Synapse Orchestrator (Postgres + Outbox + Redis + OTel) listening on :8080")
-		logger.Info().Msg("Demo UI: http://localhost:8080")
-		logger.Info().Msg("Jaeger UI: http://localhost:16686")
+		logger.Info().Msg("Synapse Orchestrator ready")
+		logger.Info().Msg("Demo UI     → http://localhost:8080")
+		logger.Info().Msg("Jaeger UI   → http://localhost:16686")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)
 		}
@@ -113,8 +121,8 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	logger.Info().Msg("shutting down...")
+	logger.Info().Msg("graceful shutdown started")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	server.Shutdown(shutdownCtx)
+	_ = server.Shutdown(shutdownCtx)
 }
